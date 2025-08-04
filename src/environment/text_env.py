@@ -79,7 +79,7 @@ class TextEnv(BaseEnv):
             master, slave = pty.openpty()
             
             self.process = subprocess.Popen(
-                ['python', '/data/share/data/llama-factory/BuckshotRouletteCLI/br.py'],
+                ['python', 'BuckshotRouletteCLI/br.py'],
                 stdin=slave,
                 stdout=slave,
                 stderr=slave,
