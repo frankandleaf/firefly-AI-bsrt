@@ -61,7 +61,11 @@ class TextEnv(BaseEnv):
             "expired_medicine": "💊",
             "health": "⚡",
             "dealer": "☠️" 
-        }       
+        }
+        self.output_file = "/tmp/game_output.log"
+        with open(self.output_file, 'w') as f:
+            f.write("")  # 清空文件内容
+        self.closed = False
     
     def _clean_ansi(self, text):
         """移除 ANSI 转义序列"""
@@ -97,7 +101,6 @@ class TextEnv(BaseEnv):
             self.output_thread = threading.Thread(target=self._read_pty_output, daemon=True)
             self.output_thread.start()
             
-            
             # 等待游戏初始化
             time.sleep(1)
 
@@ -110,8 +113,6 @@ class TextEnv(BaseEnv):
             time.sleep(25)
             
             print("游戏已启动，等待输出...")
-            obs = self.get_output()
-            self.update_bullet_types(obs)
             
             self.update_other_game_state(self.get_current_screen())
 
@@ -120,25 +121,6 @@ class TextEnv(BaseEnv):
         except Exception as e:
             print(f"启动游戏失败: {e}")
             return False
-    
-    # def _read_output(self):
-    #     """在后台线程中读取进程输出"""
-    #     try:
-    #         while self.process and self.process.poll() is None:
-    #             line = self.process.stdout.readline()
-    #             if line:
-    #                 print(line)
-    #                 # 检测清屏
-    #                 if self._is_clear_screen(line):
-    #                     self.current_screen_lines = []
-                    
-    #                 # 清理 ANSI 转义序列
-    #                 clean_line = self._clean_ansi(line.strip())
-    #                 if clean_line:  # 只添加非空行
-    #                     self.current_screen_lines.append(clean_line)
-    #                     self.output_queue.put(clean_line)
-    #     except Exception as e:
-    #         print(f"读取输出时出错: {e}")
             
     def _read_pty_output(self):
         """从 pty 读取输出"""
@@ -166,12 +148,22 @@ class TextEnv(BaseEnv):
         except Exception as e:
             print(f"读取错误: {e}")
 
+    def _write_to_log(self, line):
+        """写入到日志文件"""
+        try:
+            with open(self.output_file, 'a', encoding='utf-8') as f:
+                f.write(f"{line}\n")
+                f.flush()  # 立即刷新到磁盘
+        except Exception as e:
+            print(f"写入日志失败: {e}")
+
     def _process_line(self, line):
         """处理单行"""
         if self._is_clear_screen(line):
             self.current_screen_lines = []
             return
             
+        self._write_to_log(line)
         clean_line = self._clean_ansi(line.strip())
         if clean_line:
             self.current_screen_lines.append(clean_line)
@@ -185,8 +177,14 @@ class TextEnv(BaseEnv):
                 self.is_inverted = not self.is_inverted
             if "请输入你的道具编号来使用道具，输入+来选择射击目标:" in clean_line:
                 self.self_turn = True
-                    
-    
+            match = re.search(r'实弹(\d+)颗 空包弹(\d+)颗', clean_line)
+            if match:
+                self.update_bullet_types(match)
+            # 提取每人 * 点生命值
+            match = re.search(r'每人 (\d+) 点生命值', clean_line)
+            if match:
+                self.current_game_state['max_health'] = int(match.group(1))
+
     def get_current_screen(self):
         """获取当前屏幕显示的内容"""
         return "\n".join(self.current_screen_lines)
@@ -242,20 +240,18 @@ class TextEnv(BaseEnv):
                 self.current_game_state['bullet_types']['live_shell'] -= 1
         else:
             raise ValueError("未知的子弹类型")
+        self.is_inverted = False  # 使用后重置逆转状态
     
-    def update_bullet_types(self, obs):
+    def update_bullet_types(self, match):
         """更新子弹类型"""
-        # 从 obs 中类似 实弹3颗 空包弹2颗 的格式提取子弹数量
-        match = re.search(r'实弹(\d+)颗 空包弹(\d+)颗', obs)
-        if match:
-            self.current_game_state['bullet_types']['live_shell'] = int(match.group(1))
-            self.current_game_state['bullet_types']['blank'] = int(match.group(2))
-        else:
-            print("未能从输出中解析子弹类型信息")
+        # 从 match 中类似 实弹3颗 空包弹2颗 的格式提取子弹数量
+        self.current_game_state['bullet_types']['live_shell'] = int(match.group(1))
+        self.current_game_state['bullet_types']['blank'] = int(match.group(2))
+        self.current_game_state["use_info"] = ""
         
     def update_other_game_state(self, obs):
         """更新其他游戏状态"""
-        
+        # print("更新时游戏状态:\n", obs)
         # 解析生命值 (⚡ 符号的数量)
         # 上方是庄家生命值，下方是玩家生命值
         lines = obs.split('\n')
@@ -270,9 +266,7 @@ class TextEnv(BaseEnv):
                     self.current_game_state['dealer_health'] = health_count
                 else:
                     self.current_game_state['player_health'] = health_count
-                if self.current_game_state['max_health'] == 0:
-                    self.current_game_state['max_health'] = health_count
-        
+
         dealer_items = []
         player_items = []
         
@@ -318,14 +312,14 @@ class TextEnv(BaseEnv):
                 self.current_game_state["use_info"] += f"你使用了手机，第{bullet_number}发是{bullet_type}\n"
 
     def use(self, items:list, item_name:str = "", is_dealer_item:bool = False):
-        item_name = self.current_game_state["player_items"][int(items[0])]
+        # item_name = self.current_game_state["player_items"][int(items[0])]
         self.send_input(items[0])
         if not is_dealer_item:
             time.sleep(1)
             self.send_input("1")        
         if len(items) == 2:
             time.sleep(3)
-            item_name = self.current_game_state["dealer_items"][int(items[1])]
+            # item_name = self.current_game_state["dealer_items"][int(items[1])]
             self.use([items[1]], item_name, is_dealer_item=True)
         elif item_name == "magnifying_glass":
             time.sleep(9)
@@ -351,22 +345,24 @@ class TextEnv(BaseEnv):
         elif item_name == "handcuffs":
             self.update_use_info("你使用了手铐，使庄家跳过下个回合")
         elif item_name == "burner_phone":
-            time.sleep(10)
+            time.sleep(6.5)
             obs = self.get_current_screen()
+            if "真遗憾..." in obs:
+                self.update_use_info("你使用了手机，但没有任何信息")
+                return
             match = re.search(r'第(\d+)发是\.\.\.\n(实弹|空包弹)', obs)
             if match:
                 bullet_number = match.group(1)
                 bullet_type = match.group(2)
                 self.update_use_info(f"你使用了手机，第{bullet_number}发是{bullet_type}")
             else:
-                raise ValueError("无法识别手机信息")
+                # raise ValueError("无法识别手机信息,当前屏幕内容:\n" + obs)
+                print("无法识别手机信息,当前屏幕内容:\n" + obs)
         elif item_name == "inverter":
             self.update_use_info("你使用了逆转器，逆转了当前子弹类型")
             self.is_inverted = not self.is_inverted
 
-        obs = self.get_current_screen()    
         time.sleep(10)
-        # print(f"使用道具 {item_name} 后的状态:\n{obs}")
         
         self.update_other_game_state(self.get_current_screen())
         
@@ -391,10 +387,34 @@ class TextEnv(BaseEnv):
             
             if "重新开始？" in self.get_current_screen():
                 self.send_input("1")
+                self.close()
+                return
+            if "加倍还是放弃？" in self.get_current_screen():
+                self.clear_state()
+                self.send_input("0")
+        
+        self.update_other_game_state(self.get_current_screen())
         
     def is_self_turn(self):
         """检查是否轮到玩家行动"""
         return self.self_turn
+        
+    def clear_state(self):
+        """清除当前游戏状态"""
+        self.current_game_state = {
+            "max_health": 0,
+            "player_health": 0,
+            "dealer_health": 0,
+            "bullet_types": {
+                "live_shell": 0,
+                "blank": 0
+            },
+            "player_items": [],
+            "dealer_items": [],
+            "use_info": ""
+        }
+        self.is_inverted = False
+        self.self_turn = False
         
     def reset(self):
         """重置游戏"""
@@ -414,6 +434,11 @@ class TextEnv(BaseEnv):
         
         if self.output_thread:
             self.output_thread.join(timeout=1)
+        self.closed = True
+    
+    def is_closed(self):
+        """检查环境是否已关闭"""
+        return self.closed
     
     def __del__(self):
         """析构函数，确保进程被正确关闭"""

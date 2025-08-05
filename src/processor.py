@@ -56,7 +56,7 @@ class InteractionProcessor:
             if item == "adrenaline":
                 raise ValueError("Cannot steal adrenaline")
             print(f"Using item: {item} and stealing {item} from dealer")
-            self.env.use(items, item, is_dealer_item=True)
+            self.env.use(items, item)
             
         
     def act(self, action):
@@ -77,13 +77,13 @@ class InteractionProcessor:
             pass
         
     def play(self):
-        if env.start_game():
+        if self.env.start_game():
             messages = [
                 {"role": "system", "content": INSTRUCTION},
             ]
-            while True:
-                print("当前游戏屏幕:\n", env.get_current_screen())
-                state = env.get_current_game_state()
+            while True and not self.env.is_closed():
+                print("当前游戏屏幕:\n", self.env.get_current_screen())
+                state = self.env.get_current_game_state()
                 print("当前游戏状态:\n", state)
                 self.player_items = state["player_items"]
                 self.dealer_items = state["dealer_items"]
@@ -106,9 +106,6 @@ class InteractionProcessor:
                 action = response.split("Action:")[-1].strip()
                 print("AI Action:", action)
                 self.act(action)
-                
-                print("行动执行后屏幕:\n", env.get_current_screen())
-                print("行动执行后游戏状态:\n", env.get_current_game_state())
 
         else:
             print("游戏开始失败")
