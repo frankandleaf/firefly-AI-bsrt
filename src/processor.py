@@ -57,27 +57,18 @@ class InteractionProcessor:
                 raise ValueError("Cannot steal adrenaline")
             print(f"Using item: {item} and stealing {item} from dealer")
             self.env.use(items, item)
-            
-        
+
     def act(self, action):
         action = action.split()
         if action[0] == "shoot":
-            try:
-                self.shoot(action[1])
-            except ValueError as e:
-                print(f"Error: {e}")
-                return
-            pass
+            self.shoot(action[1])
+
         elif action[0] == "use":
-            try:
-                self.use(action[1:])    
-            except ValueError as e:
-                print(f"Error: {e}")
-                return
-            pass
-        
+            self.use(action[1:])    
+
     def play(self):
         if self.env.start_game():
+            print("游戏已启动，等待输出...")
             messages = [
                 {"role": "system", "content": INSTRUCTION},
             ]
@@ -105,7 +96,12 @@ class InteractionProcessor:
                 # 从 Action: 后面开始提取行动
                 action = response.split("Action:")[-1].strip()
                 print("AI Action:", action)
-                self.act(action)
+                try:
+                    print("等待行动...")
+                    self.act(action)
+                except ValueError as e:
+                    print(f"Error in action: {e}")
+                    break
 
         else:
             print("游戏开始失败")

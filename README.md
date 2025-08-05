@@ -41,7 +41,7 @@ python -m src.main --config config/text.yaml
 
 ```bash
 # 实时查看游戏
-tail -f /tmp/game_output.log
+tail -f /tmp/game_output.log | cat
 ```
 
 以实时观察游戏情况。

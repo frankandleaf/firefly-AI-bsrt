@@ -9,12 +9,13 @@ import select
 from src.environment.base_env import BaseEnv
 
 class TextEnv(BaseEnv):
-    def __init__(self):
+    def __init__(self, screen_refresh=True):
         super().__init__()
         self.process = None
         self.output_queue = queue.Queue()
         self.output_thread = None
         self.game_log = ""
+        self.screen_refresh = screen_refresh
         self.current_screen_lines = []
         self.self_turn = False
         self.is_inverted = False
@@ -103,23 +104,18 @@ class TextEnv(BaseEnv):
             
             # 等待游戏初始化
             time.sleep(1)
-
             # 输入 2
             self.send_input("2")
             time.sleep(1)
-            
             # 输入玩家名称
             self.send_input("SAM")
             time.sleep(25)
-            
-            print("游戏已启动，等待输出...")
-            
+
             self.update_other_game_state(self.get_current_screen())
 
             return True
             
         except Exception as e:
-            print(f"启动游戏失败: {e}")
             return False
             
     def _read_pty_output(self):
@@ -146,7 +142,7 @@ class TextEnv(BaseEnv):
                         buffer = ""
                         
         except Exception as e:
-            print(f"读取错误: {e}")
+            raise RuntimeError(f"读取 pty 输出失败: {e}")
 
     def _write_to_log(self, line):
         """写入到日志文件"""
@@ -155,12 +151,17 @@ class TextEnv(BaseEnv):
                 f.write(f"{line}\n")
                 f.flush()  # 立即刷新到磁盘
         except Exception as e:
-            print(f"写入日志失败: {e}")
+            raise RuntimeError(f"写入日志文件失败: {e}")
 
     def _process_line(self, line):
         """处理单行"""
         if self._is_clear_screen(line):
-            self.current_screen_lines = []
+            clean_line = self._clean_ansi(line.strip())
+            self.current_screen_lines = [clean_line]
+            if self.screen_refresh:
+                self._write_to_log(line)
+            else:
+                self._write_to_log(clean_line)
             return
             
         self._write_to_log(line)
@@ -214,8 +215,7 @@ class TextEnv(BaseEnv):
                 os.write(self.master_fd, (command + "\n").encode('utf-8'))
                 return True
             except Exception as e:
-                print(f"发送输入失败: {e}")
-                return False
+                raise RuntimeError(f"发送输入失败: {e}")
         return False
     
     def get_current_game_state(self):
@@ -251,7 +251,6 @@ class TextEnv(BaseEnv):
         
     def update_other_game_state(self, obs):
         """更新其他游戏状态"""
-        # print("更新时游戏状态:\n", obs)
         # 解析生命值 (⚡ 符号的数量)
         # 上方是庄家生命值，下方是玩家生命值
         lines = obs.split('\n')
@@ -315,7 +314,7 @@ class TextEnv(BaseEnv):
         # item_name = self.current_game_state["player_items"][int(items[0])]
         self.send_input(items[0])
         if not is_dealer_item:
-            time.sleep(1)
+            time.sleep(1.2)
             self.send_input("1")        
         if len(items) == 2:
             time.sleep(3)
@@ -345,7 +344,7 @@ class TextEnv(BaseEnv):
         elif item_name == "handcuffs":
             self.update_use_info("你使用了手铐，使庄家跳过下个回合")
         elif item_name == "burner_phone":
-            time.sleep(6.5)
+            time.sleep(6.8)
             obs = self.get_current_screen()
             if "真遗憾..." in obs:
                 self.update_use_info("你使用了手机，但没有任何信息")
@@ -356,8 +355,8 @@ class TextEnv(BaseEnv):
                 bullet_type = match.group(2)
                 self.update_use_info(f"你使用了手机，第{bullet_number}发是{bullet_type}")
             else:
-                # raise ValueError("无法识别手机信息,当前屏幕内容:\n" + obs)
-                print("无法识别手机信息,当前屏幕内容:\n" + obs)
+                raise ValueError("无法识别手机信息,当前屏幕内容:\n" + obs)
+
         elif item_name == "inverter":
             self.update_use_info("你使用了逆转器，逆转了当前子弹类型")
             self.is_inverted = not self.is_inverted
@@ -378,14 +377,14 @@ class TextEnv(BaseEnv):
             self.update_use_info_after_shoot(is_beer=False, is_self_turn_next=True)
         else:
             raise ValueError("目标必须是 'dealer' 或 'self'")
-        
-        print("等待射击完行动...")
+
         count = 0
         while not self.is_self_turn():
             count += 1
             time.sleep(1)
             
             if "重新开始？" in self.get_current_screen():
+                time.sleep(1)
                 self.send_input("1")
                 self.close()
                 return

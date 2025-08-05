@@ -11,7 +11,7 @@ def run(config):
     if config["environment"] not in env_mapping:
         raise ValueError(f"Unsupported environment: {config['environment']}")
     
-    env = env_mapping[config["environment"]]()
+    env = env_mapping[config["environment"]](screen_refresh=config.get("screen_refresh", True))
     processor = InteractionProcessor(env, model=config["model"])
     processor.play()
 
